@@ -1,0 +1,65 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Qianyong Yu"
+date: "March 26, 2016"
+output: html_document
+---
+```{r setup, include=FALSE}
+# turn on caching
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+## Background
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Getting and cleaning the data
+```{r}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "training.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "testing.csv")
+training <- read.csv("training.csv", header = TRUE, na.strings = c("", "NA"))
+testing <- read.csv("testing.csv", header = TRUE, na.strings = c("", "NA"))
+```
+Looking at the dataset, it's immediately obvious that many of the columns are mostly NA, which is useless for training. Also there are some timestamp and window related columns that are related to the experiment process, so we remove those as well.
+```{r}
+# remove NA columns
+training <- training[,colSums(is.na(training)) == 0]
+# remove unnecessary columns
+training <- training[, !(names(training) %in% c("X", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window"))]
+```
+## Data slicing
+In order to get a good estimate of out of sample accuracy for each model, we split the training set into data used for 5-fold cross validaiton and true validation, as follows:
+```{r message=FALSE}
+library(caret)
+# for reproducibility
+set.seed(31335)
+inTrain <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+train_sub <- training[inTrain,]
+validation_sub <- training[-inTrain,]
+folds <- createFolds(y = train_sub$classe, k = 5)
+```
+
+## Model Fitting
+Since RandomForest has very good accuracy for datasets with large number of variables and sufficient data size, let's try RandomForest first.
+```{r message=FALSE}
+library(randomForest)
+for (i in 1:5) {
+  train <- train_sub[-folds[[i]],]
+  test <- train_sub[folds[[i]],]
+  fit <- randomForest(classe ~ ., data = train)
+  cm <- confusionMatrix(test$classe, predict(fit, newdata = test))
+  print(cm$overall[["Accuracy"]])
+}
+```
+Based on the result of the cross validations, Random Forest seems to be indeed a particularly good model for this dataset. Since the accuracy for each fit is already very high, there's no need to stack them. Therefore we simply train a final model on the entire training subset and check the result with the validation subset.
+```{r}
+final <- randomForest(classe ~ ., data = train_sub)
+cm <- confusionMatrix(validation_sub$classe, predict(final, newdata = validation_sub))
+print(cm$overall[["Accuracy"]])
+```
+We can see the result is still very good.
+
+## Testing prediction
+Let's apply the final model to get a prediction for the testing dataset:
+```{r}
+predict(final, newdata = testing)
+```
